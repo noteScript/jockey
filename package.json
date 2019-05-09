@@ -8,18 +8,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BoogeeDoo/jockeyjs-bower.git"
+    "url": "git+https://github.com/noteScript/jockey.git"
   },
   "keywords": [
     "Jockey"
   ],
-  "author": "Tim Coulter <tim@timothyjcoulter.com>",
+  "author": "Tim Coulter <603803799@qq.com>",
   "contributors": [
-      "XadillaX <i@2333.moe>"
+      "M <603803799@qq.com>"
   ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/BoogeeDoo/jockeyjs-bower/issues"
+    "url": "https://github.com/noteScript/jockey/issues"
   },
-  "homepage": "https://github.com/BoogeeDoo/jockeyjs-bower#readme"
+  "homepage": "https://github.com/noteScript/jockey#readme"
 }
