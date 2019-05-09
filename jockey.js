@@ -22,179 +22,134 @@
 //  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 //  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-;(function () {
+// Non-accessible variable to send to the app, to ensure events only
+// come from the desired host.
 
-    // Non-accessible variable to send to the app, to ensure events only
-    // come from the desired host.
-    var host = window.location.host;
+window.Jockey = { listeners: {} };
 
-    var Dispatcher = {
-        callbacks: {},
+const { host } = window.location;
+let messageCount = 0;
 
-        send: function(envelope, complete) {
-            this.dispatchMessage("event", envelope, complete);
-        },
+// i.e., on a Desktop browser.
+const nullDispatcher = {
+  send(envelope, complete) { complete(); },
+  triggerCallback() {},
+  sendCallback() {},
+};
 
-        sendCallback: function(messageId) {
-            var envelope = Jockey.createEnvelope(messageId);
+// Dispatcher detection. Currently only supports iOS.
+// Looking for equivalent Android implementation.
+const iDevices = ['iPad', 'iPhone', 'iPod'];
+const iOS = iDevices.some(iDevice => navigator.platform.indexOf(iDevice) >= 0);
 
-            this.dispatchMessage("callback", envelope, function() {});
-        },
+// Detect UIWebview. In Mobile Safari proper, jockey urls cause a popup to
+// be shown that says "Safari cannot open page because the URL is invalid."
+// From here: http://stackoverflow.com/questions/4460205/detect-ipad-iphone-webview-via-javascript
 
-        triggerCallback: function(id) {
-            var dispatcher = this;
+const [UIWebView, isAndroid] = [/(iPhone|iPod|iPad).*AppleWebKit(?!.*Safari)/i.test(navigator.userAgent), navigator.userAgent.toLowerCase().indexOf('android') > -1];
 
-            // Alerts within JS callbacks will sometimes freeze the iOS app.
-            // Let's wrap the callback in a timeout to prevent this.
-            setTimeout(function() {
-                dispatcher.callbacks[id]();
-            }, 0);
-        },
+const createEnvelope = (id, type, payload) => ({
+  id, type, host, payload,
+});
 
-        // `type` can either be "event" or "callback"
-        dispatchMessage: function(type, envelope, complete) {
-            // We send the message by navigating the browser to a special URL.
-            // The iOS library will catch the navigation, prevent the UIWebView
-            // from continuing, and use the data in the URL to execute code
-            // within the iOS app.
+function jockeyOn(type, fn) {
+  const { listeners } = window.Jockey;
+  if (!listeners[type]) listeners[type] = [];
+  listeners[type].push(fn);
+}
 
-            var dispatcher = this;
+function jockeyOff(type) {
+  const { listeners } = window.Jockey;
+  if (!listeners[type]) listeners[type] = [];
+  listeners[type] = [];
+}
 
-            this.callbacks[envelope.id] = function() {
-                complete();
+const Dispatcher = {
+  callbacks: {},
+  send(envelope, complete, callback) {
+    Dispatcher.dispatchMessage('event', envelope, complete, callback);
+  },
+  sendCallback(messageId) {
+    const envelope = createEnvelope(messageId);
 
-                delete dispatcher.callbacks[envelope.id];
-            };
-
-	    var src = "jockey://" + type + "/" + envelope.id + "?" + encodeURIComponent(JSON.stringify(envelope));
-            var iframe = document.createElement("iframe"); 
-            iframe.setAttribute("src", src); 
-            document.documentElement.appendChild(iframe); 
-            iframe.parentNode.removeChild(iframe); 
-            iframe = null; 
-	  }
-	};   
-
-    var Jockey = {
-        listeners: {},
-
-        dispatcher: null,
-
-        messageCount: 0,
-
-        on: function(type, fn) {
-            if (!this.listeners.hasOwnProperty(type) || !this.listeners[type] instanceof Array) {
-                this.listeners[type] = [];
-            }
-
-            this.listeners[type].push(fn);
-        },
-
-        off: function(type) {
-            if (!this.listeners.hasOwnProperty(type) || !this.listeners[type] instanceof Array) {
-                this.listeners[type] = [];
-            }
-
-            this.listeners[type] = [];
-        },
-
-        send: function(type, payload, complete) {
-            if (payload instanceof Function) {
-                complete = payload;
-                payload = null;
-            }
-
-            payload = payload || {};
-            complete = complete || function() {};
-
-            var envelope = this.createEnvelope(this.messageCount, type, payload);
-
-            this.dispatcher.send(envelope, complete);
-
-            this.messageCount += 1;
-        },
-
-        // Called by the native application when events are sent to JS from the app.
-        // Will execute every function, FIFO order, that was attached to this event type.
-        trigger: function(type, messageId, json) {
-            var self = this;
-
-            var listenerList = this.listeners[type] || [];
-
-            var executedCount = 0;
-
-            var complete = function() {
-                executedCount += 1;
-
-                if (executedCount >= listenerList.length) {
-                    self.dispatcher.sendCallback(messageId);
-                }
-            };
-
-            for (var index = 0; index < listenerList.length; index++) {
-                var listener = listenerList[index];
-
-                // If it's a "sync" listener, we'll call the complete() function
-                // after it has finished. If it's async, we expect it to call complete().
-                if (listener.length <= 1) {
-                    listener(json);
-                    complete();
-                } else {
-                    listener(json, complete);
-                }
-            }
-
-        },
-
-        // Called by the native application in response to an event sent to it.
-        // This will trigger the callback passed to the send() function for
-        // a given message.
-        triggerCallback: function(id) {
-            this.dispatcher.triggerCallback(id);
-        },
-
-        createEnvelope: function(id, type, payload) {
-            return {
-                id: id,
-                type: type,
-                host: host,
-                payload: payload
-            };
-        }
+    Dispatcher.dispatchMessage('callback', envelope, () => {});
+  },
+  triggerCallback(id) {
+    // Alerts within JS callbacks will sometimes freeze the iOS app.
+    // Let's wrap the callback in a timeout to prevent this.
+    const callback = Dispatcher.callbacks[id];
+    return typeof callback === 'function' && process.nextTick(callback); // 执行完毕回调APP
+  },
+  // `type` can either be "event" or "callback"
+  dispatchMessage(type, envelope, complete, callback) {
+    // We send the message by navigating the browser to a special URL.
+    // The iOS library will catch the navigation, prevent the UIWebView
+    // from continuing, and use the data in the URL to execute code
+    // within the iOS app.
+    Dispatcher.callbacks[envelope.id] = () => {
+      complete();
+      delete Dispatcher.callbacks[envelope.id];
     };
 
-    // i.e., on a Desktop browser.
-    var nullDispatcher = {
-        send: function(envelope, complete) { complete(); },
-        triggerCallback: function() {},
-        sendCallback: function() {}
+    if (type === 'event' && typeof callback === 'function') {
+      jockeyOn(envelope.type, (...rest) => {
+        jockeyOff(envelope.type);
+        callback(...rest);
+      });
+    }
+
+    const src = `jockey://${type}/${envelope.id}?${encodeURIComponent(JSON.stringify(envelope))}`;
+    let iframe = window.document.createElement('iframe');
+    iframe.setAttribute('src', src);
+    window.document.documentElement.appendChild(iframe);
+    iframe.parentNode.removeChild(iframe);
+    iframe = null;
+  },
+};
+
+const dispatcher = (iOS && UIWebView) || isAndroid ? Dispatcher : nullDispatcher;
+
+Object.assign(window.Jockey, {
+
+  // Called by the native application when events are sent to JS from the app.
+  // Will execute every function, FIFO order, that was attached to this event type.
+  trigger(type, messageId, json) {
+    const { listeners } = window.Jockey;
+    const listenerList = listeners[type] || [];
+    let executedCount = 0;
+    const complete = () => {
+      executedCount += 1;
+      return executedCount >= listenerList.length && dispatcher.sendCallback(messageId);
     };
 
-    // Dispatcher detection. Currently only supports iOS.
-    // Looking for equivalent Android implementation.
-    var i = 0,
-        iOS = false,
-        iDevice = ['iPad', 'iPhone', 'iPod'];
+    // If it's a "sync" listener, we'll call the complete() function
+    // after it has finished. If it's async, we expect it to call complete().
 
-    for (; i < iDevice.length; i++) {
-        if (navigator.platform.indexOf(iDevice[i]) >= 0) {
-            iOS = true;
-            break;
-        }
-    }
+    listenerList.forEach((listener) => {
+      if (listener.length <= 1) {
+        listener(json);
+        return complete();
+      }
+      return listener(json, complete);
+    });
+  },
 
-    // Detect UIWebview. In Mobile Safari proper, jockey urls cause a popup to
-    // be shown that says "Safari cannot open page because the URL is invalid."
-    // From here: http://stackoverflow.com/questions/4460205/detect-ipad-iphone-webview-via-javascript
+  // Called by the native application in response to an event sent to it.
+  // This will trigger the callback passed to the send() function for
+  // a given message.
+  triggerCallback: dispatcher.triggerCallback, // params:{id}
+});
 
-    var UIWebView = /(iPhone|iPod|iPad).*AppleWebKit(?!.*Safari)/i.test(navigator.userAgent);
-	var isAndroid = navigator.userAgent.toLowerCase().indexOf("android") > -1;
-	
-    if ((iOS && UIWebView) || isAndroid) { 
-        Jockey.dispatcher = Dispatcher;
-    } else {
-        Jockey.dispatcher = nullDispatcher;
-    }
-
-    window.Jockey = Jockey;
-})();
+export default {
+  on: jockeyOn,
+  off: jockeyOff,
+  send(type, payload = {}, complete = Function, callback) {
+    const sendParams = payload instanceof Function ? {
+      complete: payload,
+      payload: null,
+    } : { complete, payload };
+    const envelope = createEnvelope(messageCount, type, sendParams.payload);
+    messageCount += 1;
+    dispatcher.send(envelope, sendParams.complete, callback);
+  },
+};
